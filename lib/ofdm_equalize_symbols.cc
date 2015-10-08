@@ -31,7 +31,8 @@ public:
 ofdm_equalize_symbols_impl(Equalizer algo, bool debug) : block("ofdm_equalize_symbols",
 			gr::io_signature::make(1, 1, 64 * sizeof(gr_complex)),
 			gr::io_signature::make(1, 1, 48 * sizeof(gr_complex))),
-			d_debug(debug), d_equalizer(NULL) {
+			d_debug(debug), d_equalizer(NULL)/*,
+			d_freq_offset_coarse(0.0), d_freq_offset_fine(0.0)*/ {
 
 	set_relative_rate(1);
 	set_tag_propagation_policy(block::TPP_DONT);
@@ -57,11 +58,24 @@ int general_work (int noutput_items, gr_vector_int& ninput_items,
 
 	while((i < ninput_items[0]) && (o < noutput_items)) {
 
-		get_tags_in_window(tags, 0, i, i + 1, pmt::string_to_symbol("ofdm_start"));
+		get_tags_in_window(tags, 0, i, i + 1, pmt::string_to_symbol("ofdm_start_long"));
 
 		// new WiFi frame
 		if(tags.size()) {
 			d_nsym = 0;
+
+			const uint64_t offset = tags.front().offset;
+			/*std::vector<gr::tag_t> tags_freq_offset_coarse, tags_freq_offset_fine;
+			get_tags_in_range(tags_freq_offset_coarse, 0, offset, offset + 1, pmt::string_to_symbol("freq_offset_coarse"));
+			d_freq_offset_coarse = pmt::to_double(tags_freq_offset_coarse.front().value);
+			get_tags_in_range(tags_freq_offset_fine, 0, offset, offset + 1, pmt::string_to_symbol("freq_offset_fine"));
+			d_freq_offset_fine = pmt::to_double(tags_freq_offset_fine.front().value);*/
+
+			std::vector<gr::tag_t> tags_meta_dict;
+			get_tags_in_range(tags_meta_dict, 0, offset, offset + 1, pmt::string_to_symbol("meta"));
+			if (tags_meta_dict.empty())
+				throw std::runtime_error("no meta dict");
+			d_meta_dict = tags_meta_dict.front().value;
 		}
 
 		// first data symbol (= signal field)
@@ -70,6 +84,26 @@ int general_work (int noutput_items, gr_vector_int& ninput_items,
 				pmt::string_to_symbol("ofdm_start"),
 				pmt::PMT_T,
 				pmt::string_to_symbol(name()));
+
+			/*add_item_tag(0, nitems_written(0) + o,
+					pmt::string_to_symbol("freq_offset_coarse"),
+					pmt::from_double(d_freq_offset_coarse),
+					pmt::string_to_symbol(name()));
+
+			add_item_tag(0, nitems_written(0) + o,
+				pmt::string_to_symbol("freq_offset_fine"),
+				pmt::from_double(d_freq_offset_fine),
+				pmt::string_to_symbol(name()));*/
+
+			if (d_meta_dict)
+			{
+				add_item_tag(0, nitems_written(0) + o,
+					pmt::string_to_symbol("meta"),
+					d_meta_dict,
+					pmt::string_to_symbol(name()));
+
+				d_meta_dict = NULL;
+			}
 		}
 
 		d_equalizer->equalize(in + (i * 64), out + (o * 48), d_nsym);
@@ -110,6 +144,9 @@ private:
 	equalizer::base *d_equalizer;
 	std::vector<gr::tag_t> tags;
 	gr::thread::mutex d_mutex;
+
+	//double d_freq_offset_coarse, d_freq_offset_fine;
+	pmt::pmt_t d_meta_dict;
 };
 
 

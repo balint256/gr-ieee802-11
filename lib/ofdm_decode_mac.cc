@@ -36,7 +36,9 @@ ofdm_decode_mac_impl(bool log, bool debug) : block("ofdm_decode_mac",
 			d_debug(debug),
 			d_ofdm(BPSK_1_2),
 			d_tx(d_ofdm, 0),
-			d_frame_complete(true) {
+			d_frame_complete(true)/*,
+			d_freq_offset_coarse(0.0),
+			d_freq_offset_fine(0.0)*/ {
 
 	message_port_register_out(pmt::mp("out"));
 
@@ -80,7 +82,7 @@ int general_work (int noutput_items, gr_vector_int& ninput_items,
 	while(i < ninput_items[0]) {
 
 		get_tags_in_range(tags, 0, nread + i, nread + i + 1,
-			pmt::string_to_symbol("ofdm_start"));
+			pmt::string_to_symbol("ofdm_start_data"));
 
 		if(tags.size()) {
 			if (d_frame_complete == false) {
@@ -88,6 +90,20 @@ int general_work (int noutput_items, gr_vector_int& ninput_items,
 				dout << "Already copied " << copied << " out of " << d_tx.n_sym << " symbols of last frame" << std::endl;
 			}
 			d_frame_complete = false;
+
+			std::vector<gr::tag_t> tags_freq_offset_fine, tags_freq_offset_coarse;
+
+			const uint64_t offset = tags.front().offset;
+			/*get_tags_in_range(tags_freq_offset_coarse, 0, offset, offset + 1, pmt::string_to_symbol("freq_offset_coarse"));
+			d_freq_offset_coarse = pmt::to_double(tags_freq_offset_coarse.front().value);
+			get_tags_in_range(tags_freq_offset_fine, 0, offset, offset + 1, pmt::string_to_symbol("freq_offset_fine"));
+			d_freq_offset_fine = pmt::to_double(tags_freq_offset_fine.front().value);*/
+
+			std::vector<gr::tag_t> tags_meta_dict;
+			get_tags_in_range(tags_meta_dict, 0, offset, offset + 1, pmt::string_to_symbol("meta"));
+			if (tags_meta_dict.empty())
+				throw std::runtime_error("no meta dict");
+			d_meta_dict = tags_meta_dict.front().value;
 
 			pmt::pmt_t tuple = tags[0].value;
 			int len_data = pmt::to_uint64(pmt::car(tuple));
@@ -116,7 +132,7 @@ int general_work (int noutput_items, gr_vector_int& ninput_items,
 
 			if(copied == d_tx.n_sym) {
 				dout << "received complete frame - decoding" << std::endl;
-				decode();
+				decode(/*d_freq_offset_coarse, d_freq_offset_fine*/);
 				in += 48;
 				i++;
 				d_frame_complete = true;
@@ -132,7 +148,7 @@ int general_work (int noutput_items, gr_vector_int& ninput_items,
 	return 0;
 }
 
-void decode() {
+void decode(/*double freq_offset_coarse, double freq_offset_fine*/) {
 	demodulate();
 	deinterleave();
 	decode_conv();
@@ -147,14 +163,20 @@ void decode() {
 		return;
 	}
 
-	mylog(boost::format("encoding: %1% - length: %2% - symbols: %3%")
-			% d_ofdm.encoding % d_tx.psdu_size % d_tx.n_sym);
+	double freq_offset_coarse = 0.0, freq_offset_fine = 0.0;	// FIXME: from d_meta_dict
+
+	mylog(boost::format("encoding: %1% - length: %2% - symbols: %3% - freq offset coarse/fine: %4%, %5%")
+			% d_ofdm.encoding % d_tx.psdu_size % d_tx.n_sym % freq_offset_coarse % freq_offset_fine);
 
 	// create PDU
 	pmt::pmt_t blob = pmt::make_blob(out_bytes + 2, d_tx.psdu_size - 4);
 	pmt::pmt_t enc = pmt::from_uint64(d_ofdm.encoding);
 	pmt::pmt_t dict = pmt::make_dict();
 	dict = pmt::dict_add(dict, pmt::mp("encoding"), enc);
+	//dict = pmt::dict_add(dict, pmt::mp("freq_offset_coarse"), pmt::from_double(freq_offset_coarse));
+	//dict = pmt::dict_add(dict, pmt::mp("freq_offset_fine"), pmt::from_double(freq_offset_fine));
+	//dict = pmt::dict_add(dict, pmt::mp("freq_offset"), pmt::from_double(freq_offset));
+	dict = pmt::dict_add(dict, pmt::mp("meta"), d_meta_dict);
 	message_port_pub(pmt::mp("out"), pmt::cons(dict, blob));
 }
 
@@ -323,6 +345,9 @@ private:
 	Modulator<std::complex<double> > qpsk;
 	Modulator<std::complex<double> > qam16;
 	Modulator<std::complex<double> > qam64;
+
+	//double d_freq_offset_coarse, d_freq_offset_fine;
+	pmt::pmt_t d_meta_dict;
 };
 
 ofdm_decode_mac::sptr

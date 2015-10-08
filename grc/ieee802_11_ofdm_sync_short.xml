@@ -64,7 +64,8 @@
 
 	<sink>
 		<name>abs</name>
-		<type>complex</type>
+		<!--<type>complex</type>-->
+		<type>float</type>
 		<nports>1</nports>
 	</sink>
 

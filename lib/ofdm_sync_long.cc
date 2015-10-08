@@ -42,7 +42,9 @@ ofdm_sync_long_impl(unsigned int sync_length, bool log, bool debug) : block("ofd
 		d_debug(debug),
 		d_offset(0),
 		d_state(SYNC),
-		SYNC_LENGTH(sync_length) {
+		SYNC_LENGTH(sync_length),
+		//d_freq_offset_coarse(0.0),
+		d_long_correlation_1(0.0), d_long_correlation_2(0.0) {
 
 	set_tag_propagation_policy(block::TPP_DONT);
 	d_correlation = gr::fft::malloc_complex(8192);
@@ -67,11 +69,21 @@ int general_work (int noutput, gr_vector_int& ninput_items,
 	int ninput = std::min(std::min(ninput_items[0], ninput_items[1]), 8192);
 
 	const uint64_t nread = nitems_read(0);
-	get_tags_in_range(d_tags, 0, nread, nread + ninput);
+	get_tags_in_range(d_tags, 0, nread, nread + ninput, pmt::string_to_symbol("ofdm_start_short"));
 	if (d_tags.size()) {
 		std::sort(d_tags.begin(), d_tags.end(), gr::tag_t::offset_compare);
 
 		const uint64_t offset = d_tags.front().offset;
+
+		//std::vector<gr::tag_t> tags_freq_offset_coarse;
+		//get_tags_in_range(tags_freq_offset_coarse, 0, offset, offset + 1, pmt::string_to_symbol("freq_offset_coarse"));
+		//d_freq_offset_coarse = pmt::to_double(tags_freq_offset_coarse.front().value);
+
+		std::vector<gr::tag_t> tags_meta_dict;
+		get_tags_in_range(tags_meta_dict, 0, offset, offset + 1, pmt::string_to_symbol("meta"));
+		if (tags_meta_dict.empty())
+			throw std::runtime_error("no meta dict");
+		d_meta_dict = tags_meta_dict.front().value;
 
 		if(offset > nread) {
 			ninput = offset - nread;
@@ -120,9 +132,33 @@ int general_work (int noutput, gr_vector_int& ninput_items,
 
 			if(!rel)  {
 				add_item_tag(0, nitems_written(0),
-					pmt::string_to_symbol("ofdm_start"),
+					pmt::string_to_symbol("ofdm_start_long"),
 					pmt::PMT_T,
 					pmt::string_to_symbol(name()));
+
+				/*add_item_tag(0, nitems_written(0),
+					pmt::string_to_symbol("freq_offset_coarse"),
+					pmt::from_double(d_freq_offset_coarse),
+					pmt::string_to_symbol(name()));
+
+				add_item_tag(0, nitems_written(0),
+					pmt::string_to_symbol("freq_offset_fine"),
+					pmt::from_double(d_freq_offset),
+					pmt::string_to_symbol(name()));*/
+
+				if (d_meta_dict)
+				{
+					d_meta_dict = pmt::dict_add(d_meta_dict, pmt::string_to_symbol("freq_offset_fine"), pmt::from_double(d_freq_offset));
+					d_meta_dict = pmt::dict_add(d_meta_dict, pmt::string_to_symbol("long_correlation_1"), pmt::from_double(d_long_correlation_1));
+					d_meta_dict = pmt::dict_add(d_meta_dict, pmt::string_to_symbol("long_correlation_2"), pmt::from_double(d_long_correlation_2));
+
+					add_item_tag(0, nitems_written(0),
+						pmt::string_to_symbol("meta"),
+						d_meta_dict,
+						pmt::string_to_symbol(name()));
+
+					d_meta_dict = NULL;
+				}
 			}
 
 			if(rel >= 0 && (rel < 128 || ((rel - 128) % 80) > 15)) {
@@ -204,15 +240,25 @@ void search_frame_start() {
 				d_freq_offset = arg(first * conj(second)) / 64;
 				//std::cout << "frequency offset " << d_freq_offset << std::endl;
 				// nice match found, return immediately
+
+				d_long_correlation_1 = abs(get<0>(vec[i]));
+				d_long_correlation_2 = abs(get<0>(vec[k]));
+
 				return;
 
 			// TODO: check if these offsets make sense
 			} else if(diff == 63) {
 				d_frame_start = max(get<1>(vec[i]), get<1>(vec[k])) + 63 - 128 - 1;
 				d_freq_offset = arg(first * conj(second)) / 64;
+
+				d_long_correlation_1 = abs(get<0>(vec[i]));
+				d_long_correlation_2 = abs(get<0>(vec[k]));
 			} else if(diff == 65) {
 				d_frame_start = max(get<1>(vec[i]), get<1>(vec[k])) + 64 - 128 - 1;
 				d_freq_offset = arg(first * conj(second)) / 64;
+
+				d_long_correlation_1 = abs(get<0>(vec[i]));
+				d_long_correlation_2 = abs(get<0>(vec[k]));
 			}
 		}
 	}
@@ -235,6 +281,10 @@ private:
 	const int  SYNC_LENGTH;
 
 	static const std::vector<gr_complex> LONG;
+
+	//double d_freq_offset_coarse;
+	double d_long_correlation_1, d_long_correlation_2;
+	pmt::pmt_t d_meta_dict;
 };
 
 ofdm_sync_long::sptr

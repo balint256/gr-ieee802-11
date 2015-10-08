@@ -32,7 +32,8 @@ ofdm_decode_signal_impl(bool log, bool debug) : block("ofdm_decode_signal",
 			gr::io_signature::make(1, 1, 48 * sizeof(gr_complex))),
 			d_log(log),
 			d_debug(debug),
-			d_copy_symbols(0) {
+			d_copy_symbols(0)/*,
+			d_freq_offset_coarse(0.0), d_freq_offset_fine(0.0)*/  {
 
 	decoded_bits.set_size(24);
 	set_relative_rate(1);
@@ -64,9 +65,30 @@ int general_work (int noutput_items, gr_vector_int& ninput_items,
 			pmt::string_to_symbol("ofdm_start"));
 
 		if(tags.size()) {
-			for(int n = 0; n < 48; n++) {
+			const uint64_t offset = tags.front().offset;
+			/*std::vector<gr::tag_t> tags_freq_offset_coarse, tags_freq_offset_fine;
+			get_tags_in_range(tags_freq_offset_coarse, 0, offset, offset + 1, pmt::string_to_symbol("freq_offset_coarse"));
+			d_freq_offset_coarse = pmt::to_double(tags_freq_offset_coarse.front().value);
+			get_tags_in_range(tags_freq_offset_fine, 0, offset, offset + 1, pmt::string_to_symbol("freq_offset_fine"));
+			d_freq_offset_fine = pmt::to_double(tags_freq_offset_fine.front().value);*/
+
+			std::vector<gr::tag_t> tags_meta_dict;
+			get_tags_in_range(tags_meta_dict, 0, offset, offset + 1, pmt::string_to_symbol("meta"));
+			if (tags_meta_dict.empty())
+				throw std::runtime_error("no meta dict");
+			d_meta_dict = tags_meta_dict.front().value;
+
+			double sum = 0.0;
+
+			const size_t header_bit_count = 48;
+
+			for(int n = 0; n < header_bit_count; n++) {
 				bits[n] = -real(in[n]);
+				sum += bits[n];
 			}
+
+			double ave = sum / (double)header_bit_count;
+			d_meta_dict = pmt::dict_add(d_meta_dict, pmt::string_to_symbol("header_ave"), pmt::from_double(ave));
 
 			deinterleave();
 
@@ -75,10 +97,30 @@ int general_work (int noutput_items, gr_vector_int& ninput_items,
 			if(print_signal()) {
 
 				add_item_tag(0, nitems_written(0) + o,
-					pmt::string_to_symbol("ofdm_start"),
+					pmt::string_to_symbol("ofdm_start_data"),
 					pmt::cons(pmt::from_uint64(d_len),
 						pmt::from_uint64(d_encoding)),
 					pmt::string_to_symbol(name()));
+
+				/*add_item_tag(0, nitems_written(0) + o,
+					pmt::string_to_symbol("freq_offset_coarse"),
+					pmt::from_double(d_freq_offset_coarse),
+					pmt::string_to_symbol(name()));
+
+				add_item_tag(0, nitems_written(0) + o,
+					pmt::string_to_symbol("freq_offset_fine"),
+					pmt::from_double(d_freq_offset_fine),
+					pmt::string_to_symbol(name()));*/
+
+				if (d_meta_dict)
+				{
+					add_item_tag(0, nitems_written(0) + o,
+						pmt::string_to_symbol("meta"),
+						d_meta_dict,
+						pmt::string_to_symbol(name()));
+
+					d_meta_dict = NULL;
+				}
 			}
 
 		} else if(d_copy_symbols) {
@@ -211,6 +253,9 @@ private:
 	int    d_copy_symbols;
 	bvec decoded_bits;
 	static int inter[48];
+
+	//double d_freq_offset_coarse, d_freq_offset_fine;
+	pmt::pmt_t d_meta_dict;
 };
 
 ofdm_decode_signal::sptr

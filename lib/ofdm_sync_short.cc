@@ -30,7 +30,7 @@ class ofdm_sync_short_impl : public ofdm_sync_short {
 public:
 ofdm_sync_short_impl(double threshold, unsigned int min_plateau, bool log, bool debug) :
 		block("ofdm_sync_short",
-			gr::io_signature::make3(3, 3, sizeof(gr_complex), sizeof(gr_complex), sizeof(float)),
+			gr::io_signature::make3(3, 3, sizeof(gr_complex), sizeof(/*gr_complex*/float), sizeof(float)),
 			gr::io_signature::make(1, 1, sizeof(gr_complex))),
 		d_log(log),
 		d_debug(debug),
@@ -49,7 +49,8 @@ int general_work (int noutput_items, gr_vector_int& ninput_items,
 		gr_vector_void_star& output_items) {
 
 	const gr_complex *in = (const gr_complex*)input_items[0];
-	const gr_complex *in_abs = (const gr_complex*)input_items[1];
+	//const gr_complex *in_abs = (const gr_complex*)input_items[1];
+	const float *in_abs = (const float*)input_items[1];
 	const float *in_cor = (const float*)input_items[2];
 	gr_complex *out = (gr_complex*)output_items[0];
 
@@ -71,9 +72,9 @@ int general_work (int noutput_items, gr_vector_int& ninput_items,
 				} else {
 					d_state = COPY;
 					d_copied = 0;
-					d_freq_offset = arg(in_abs[i]) / 16;
+					d_freq_offset = /*arg*/(in_abs[i]) / 16;
 					d_plateau = 0;
-					insert_tag(nitems_written(0));
+					insert_tag(nitems_written(0), d_freq_offset);
 					dout << "SHORT Frame!" << std::endl;
 					break;
 				}
@@ -98,8 +99,8 @@ int general_work (int noutput_items, gr_vector_int& ninput_items,
 				} else if(d_copied > MIN_GAP) {
 					d_copied = 0;
 					d_plateau = 0;
-					d_freq_offset = arg(in_abs[o]) / 16;
-					insert_tag(nitems_written(0) + o);
+					d_freq_offset = /*arg*/(in_abs[o]) / 16;
+					insert_tag(nitems_written(0) + o, d_freq_offset);
 					dout << "SHORT Frame!" << std::endl;
 					break;
 				}
@@ -128,13 +129,18 @@ int general_work (int noutput_items, gr_vector_int& ninput_items,
 	return 0;
 }
 
-void insert_tag(uint64_t item) {
-	mylog(boost::format("frame start at %1%") % item);
+void insert_tag(uint64_t item, double freq_offset) {
+	mylog(boost::format("frame start at %1%, freq offset: %2%") % item % freq_offset);
 
-	const pmt::pmt_t key = pmt::string_to_symbol("ofdm_start");
+	const pmt::pmt_t key = pmt::string_to_symbol("ofdm_start_short");
 	const pmt::pmt_t value = pmt::PMT_T;
 	const pmt::pmt_t srcid = pmt::string_to_symbol(name());
 	add_item_tag(0, item, key, value, srcid);
+
+	//add_item_tag(0, item, pmt::string_to_symbol("freq_offset_coarse"), pmt::from_double(freq_offset), srcid);
+	pmt::pmt_t dict = pmt::make_dict();
+	dict = pmt::dict_add(dict, pmt::string_to_symbol("freq_offset_coarse"), pmt::from_double(freq_offset));
+	add_item_tag(0, item, pmt::string_to_symbol("meta"), dict, srcid);
 }
 
 private:

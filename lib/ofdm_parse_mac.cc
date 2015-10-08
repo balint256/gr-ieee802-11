@@ -362,5 +362,3 @@ ofdm_parse_mac::sptr
 ofdm_parse_mac::make(bool log, bool debug) {
 	return gnuradio::get_initial_sptr(new ofdm_parse_mac_impl(log, debug));
 }
-
-
